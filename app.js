@@ -12,9 +12,63 @@
   const pct = (v) => (v === null || v === undefined ? 'Auftragssumme fehlt' : pctFmt.format(v));
   const datum = (iso) => (iso ? iso.split('-').reverse().join('.') : '–');
 
+  // ---------- Hinweise und Rückfragen im Seiteninhalt ----------
+  // Kein alert/confirm/prompt: eingebettete Ansichten (z. B. claude.ai) unterdrücken sie.
+
+  let toastTimer = null;
+  function notify(msg) {
+    const t = $('#toast');
+    t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
+  }
+
+  function ask(msg, okLabel) {
+    const d = $('#frage');
+    $('#frage-text').textContent = msg;
+    $('#frage-ok').textContent = okLabel || 'OK';
+    d.returnValue = '';
+    d.showModal();
+    return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true }));
+  }
+
+  // Datei anbieten: in claude.ai über die Download-Freigabe, sonst als normaler Browser-Download.
+  async function saveFile(name, text, type) {
+    const downloads = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
+    if (downloads) {
+      try { await downloads.save({ filename: name, data: text }); notify('Gespeichert: ' + name); }
+      catch (e) { if (e && e.code !== 'declined') notify('Speichern nicht möglich (' + (e.code || 'Fehler') + ').'); }
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   // ---------- Speicher ----------
 
-  let state = { settings: { auftraggeber: 'DB InfraGO AG' }, rows: [] };
+  // Frei erfundener Beispiel-Nachtrag (Nr. BEISPIEL, zählt nicht in der Übersicht).
+  function beispielRow() {
+    return Object.assign(NM.emptyRow(), {
+      nr: 'BEISPIEL', vorhaben: 'Streckenerneuerung Musterstrecke (Beispiel)',
+      kurzbeschreibung: 'Zusätzlicher Bodenaustausch km 12,4–12,9 wegen Schadstoffbefund',
+      grundlage: '§ 2 Abs. 6 VOB/B (zusätzliche Leistung)', anordnung: 'AG-Bauüberwachung, Aktennotiz vom 21.09.2026',
+      ausfuehrungsbeginn: '2026-12-07', angekuendigtAm: '2026-09-25', angebotGeplant: '2026-11-27',
+      vorabBewertung: 48500, bewertungsbasis: 'Grobschätzung',
+      herleitung: 'ca. 1.250 m³ × 38,80 €/m³ (Annahme: Einheitspreis angelehnt an Urkalkulation, Menge geschätzt); Entsorgung nicht enthalten',
+      bewertungVom: '2026-09-25', status: 'Angekündigt',
+      baustoffe: 'Ersatzboden Körnung 0/45, Lieferant Muster GmbH (Beispiel)', regelwerk: 'laut Vertrag / LV-Vorbemerkungen prüfen (Beispiel, keine Vorgabe)',
+      strategie: 'Bündelung mit Nachtrag Entwässerung; vor Abschlagsrechnung 12/2026 einreichen',
+      naechsterSchritt: 'Mengenermittlung ergänzen, Angebot vorbereiten', verantwortlich: 'Bauleitung',
+      letzteReaktion: 'AG-Bauüberwachung fordert Nachweis Schadstoffgutachten (Mail vom 24.09.2026)',
+      nachfassenAm: '2026-10-06', ergaenzungsbedarf: 'Laborgutachten, Mengenermittlung km 12,4–12,9',
+      geaendertVon: 'Beispiel', geaendertAm: '2026-09-29',
+    });
+  }
+
+  // Beim ersten Öffnen zeigt der Beispiel-Nachtrag, wie die Liste aussieht.
+  let state = { settings: { auftraggeber: 'DB InfraGO AG' }, rows: [beispielRow()] };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) state = JSON.parse(raw);
@@ -23,7 +77,7 @@
   state.rows = state.rows || [];
 
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { alert('Speichern im Browser nicht möglich. Bitte Daten exportieren.'); }
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { notify('Speichern im Browser nicht möglich. Bitte Daten exportieren.'); }
   }
 
   const today = () => NM.todayISO();
@@ -234,9 +288,9 @@
 
   $('#editor-abbrechen').onclick = () => { $('#editor').close(); editing = null; };
 
-  $('#editor-loeschen').onclick = () => {
+  $('#editor-loeschen').onclick = async () => {
     const r = state.rows[editing];
-    if (!confirm(`Nachtrag ${r.nr} aus diesem Browser löschen? Die Excel-Nachtragsliste bleibt unberührt.`)) return;
+    if (!(await ask(`Nachtrag ${r.nr} aus diesem Browser löschen? Die Excel-Nachtragsliste bleibt unberührt.`, 'Löschen'))) return;
     state.rows.splice(editing, 1);
     save(); $('#editor').close(); editing = null; render();
   };
@@ -244,13 +298,10 @@
   $('#editor-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const r = formRow();
-    if (!r.nr) { alert('Nr. fehlt.'); return; }
+    if (!r.nr) { notify('Nr. fehlt.'); return; }
     const dup = state.rows.findIndex((x) => String(x.nr) === String(r.nr));
-    if (dup !== -1 && dup !== editing) { alert(`Nr. ${r.nr} gibt es schon.`); return; }
-    if (!state.settings.bearbeiter) {
-      const n = prompt('Name oder Kürzel für „Geändert von“:');
-      if (n) { state.settings.bearbeiter = n.trim(); }
-    }
+    if (dup !== -1 && dup !== editing) { notify(`Nr. ${r.nr} gibt es schon.`); return; }
+    if (!state.settings.bearbeiter) notify('Tipp: Name oder Kürzel unter „Projekt & Daten“ eintragen, dann wird „Geändert von“ gefüllt.');
     r.geaendertVon = state.settings.bearbeiter || r.geaendertVon || '';
     r.geaendertAm = today();
     if (editing === -1) state.rows.push(r); else state.rows[editing] = Object.assign({}, state.rows[editing], r);
@@ -308,22 +359,18 @@
     $('#view-uebergabe').innerHTML = `
       <div class="toolbar">
         <h2 style="margin:0">Übergabe an die Geschäftsleitung</h2><span class="spacer"></span>
-        <button id="g-copy">Kopieren</button><button id="g-print">Drucken</button>
+        <button id="g-copy">Kopieren</button><button id="g-txt">Als Textdatei speichern</button>
       </div>
       <p class="muted">Entwurf zur Freigabe. Monatlich vor der Abschlagsrechnung und immer vor einer Eskalation an die Rechtsabteilung. Datum je Nachtrag in „Übergabe an Geschäftsleitung“ eintragen.</p>
-      <div class="card"><pre class="bericht">${esc(t)}</pre></div>`;
-    $('#g-copy').onclick = () => navigator.clipboard.writeText(t).then(() => alert('Kopiert.'), () => alert('Kopieren nicht möglich.'));
-    $('#g-print').onclick = () => window.print();
+      <div class="card"><pre class="bericht" id="g-text">${esc(t)}</pre></div>`;
+    $('#g-copy').onclick = () => {
+      const markieren = () => { const sel = window.getSelection(); const range = document.createRange(); range.selectNodeContents($('#g-text')); sel.removeAllRanges(); sel.addRange(range); notify('Text markiert. Mit Strg+C kopieren.'); };
+      try { navigator.clipboard.writeText(t).then(() => notify('Kopiert.'), markieren); } catch (e) { markieren(); }
+    };
+    $('#g-txt').onclick = () => saveFile(`uebergabe-geschaeftsleitung-${today()}.txt`, t, 'text/plain;charset=utf-8');
   }
 
   // ---------- Projekt & Daten ----------
-
-  function download(name, text, type) {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type }));
-    a.download = name; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  }
 
   function renderEinstellungen() {
     const s = state.settings;
@@ -385,15 +432,15 @@
         if (file.name.toLowerCase().endsWith('.json')) {
           const data = JSON.parse(text);
           rows = data.rows || [];
-          if (data.settings && confirm('Projektangaben aus der Sicherung übernehmen?')) state.settings = data.settings;
+          if (data.settings && await ask('Projektangaben aus der Sicherung übernehmen?', 'Übernehmen')) state.settings = data.settings;
         } else {
           const res = NM.fromCSV(text);
           rows = res.rows;
           if (res.unbekannt.length) info = `\nNicht zugeordnete Spalten (ignoriert): ${res.unbekannt.slice(0, 12).join(', ')}${res.unbekannt.length > 12 ? ' …' : ''}`;
         }
-      } catch (err) { alert('Datei nicht lesbar: ' + err.message); return; }
+      } catch (err) { notify('Datei nicht lesbar: ' + err.message); return; }
       const ersetzen = $('#d-ersetzen').checked;
-      if (!confirm(`${rows.length} Nachträge gefunden. ${ersetzen ? 'Bestand ersetzen' : 'Nach Nr. zusammenführen'}?${info}`)) return;
+      if (!(await ask(`${rows.length} Nachträge gefunden. ${ersetzen ? 'Bestand ersetzen' : 'Nach Nr. zusammenführen'}?${info}`, 'Importieren'))) { e.target.value = ''; return; }
       if (ersetzen) state.rows = rows;
       else rows.forEach((r) => {
         const i = state.rows.findIndex((x) => String(x.nr) === String(r.nr));
@@ -403,34 +450,19 @@
     };
 
     const stamp = () => today();
-    $('#d-csv').onclick = () => download(`nachtragsliste-${stamp()}.csv`, NM.toCSV(state.rows), 'text/csv;charset=utf-8');
+    $('#d-csv').onclick = () => saveFile(`nachtragsliste-${stamp()}.csv`, NM.toCSV(state.rows), 'text/csv;charset=utf-8');
     $('#d-csv-ext').onclick = () => {
       const rows = state.rows.filter((r) => !NM.isExample(r)).map(NM.externalRow);
-      download(`nachtraege-aufstellung-ag-ENTWURF-${stamp()}.csv`, NM.toCSV(rows, NM.EXTERNAL_KEYS), 'text/csv;charset=utf-8');
+      saveFile(`nachtraege-aufstellung-ag-ENTWURF-${stamp()}.csv`, NM.toCSV(rows, NM.EXTERNAL_KEYS), 'text/csv;charset=utf-8');
     };
-    $('#d-json').onclick = () => download(`nachtragsmanagement-sicherung-${stamp()}.json`, JSON.stringify(state, null, 2), 'application/json');
+    $('#d-json').onclick = () => saveFile(`nachtragsmanagement-sicherung-${stamp()}.json`, JSON.stringify(state, null, 2), 'application/json');
     $('#d-beispiel').onclick = () => {
-      if (state.rows.some(NM.isExample)) { alert('Beispiel ist schon vorhanden.'); return; }
-      state.rows.push(Object.assign(NM.emptyRow(), {
-        nr: 'BEISPIEL', vorhaben: 'Streckenerneuerung Musterstrecke (Beispiel)',
-        kurzbeschreibung: 'Zusätzlicher Bodenaustausch km 12,4–12,9 wegen Schadstoffbefund',
-        grundlage: '§ 2 Abs. 6 VOB/B (zusätzliche Leistung)', anordnung: 'AG-Bauüberwachung, Aktennotiz vom 21.09.2026',
-        ausfuehrungsbeginn: '2026-12-07', angekuendigtAm: '2026-09-25', angebotGeplant: '2026-11-27',
-        vorabBewertung: 48500, bewertungsbasis: 'Grobschätzung',
-        herleitung: 'ca. 1.250 m³ × 38,80 €/m³ (Annahme: Einheitspreis angelehnt an Urkalkulation, Menge geschätzt); Entsorgung nicht enthalten',
-        bewertungVom: '2026-09-25', status: 'Angekündigt',
-        baustoffe: 'Ersatzboden Körnung 0/45, Lieferant Muster GmbH (Beispiel)', regelwerk: 'laut Vertrag / LV-Vorbemerkungen prüfen (Beispiel, keine Vorgabe)',
-        strategie: 'Bündelung mit Nachtrag Entwässerung; vor Abschlagsrechnung 12/2026 einreichen',
-        naechsterSchritt: 'Mengenermittlung ergänzen, Angebot vorbereiten', verantwortlich: 'Bauleitung',
-        letzteReaktion: 'AG-Bauüberwachung fordert Nachweis Schadstoffgutachten (Mail vom 24.09.2026)',
-        nachfassenAm: '2026-10-06', ergaenzungsbedarf: 'Laborgutachten, Mengenermittlung km 12,4–12,9',
-        geaendertVon: 'Beispiel', geaendertAm: '2026-09-29',
-      }));
+      if (state.rows.some(NM.isExample)) { notify('Beispiel ist schon vorhanden.'); return; }
+      state.rows.push(beispielRow());
       save(); show('liste');
     };
-    $('#d-leeren').onclick = () => {
-      if (!confirm('Alle Nachträge und Projektangaben in diesem Browser löschen? Vorher exportieren. Die Excel-Nachtragsliste bleibt unberührt.')) return;
-      if (!confirm('Wirklich löschen?')) return;
+    $('#d-leeren').onclick = async () => {
+      if (!(await ask('Alle Nachträge und Projektangaben in diesem Browser löschen? Vorher exportieren. Die Excel-Nachtragsliste bleibt unberührt.', 'Alles löschen'))) return;
       state = { settings: { auftraggeber: 'DB InfraGO AG' }, rows: [] };
       save(); render();
     };

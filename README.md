@@ -20,7 +20,7 @@ Schlanke Web-App zur Steuerung von Nachträgen nach VOB/B (AG z. B. DB InfraGO A
 | Übersicht | Fristen, Anerkennung, Nachtragsumfang in % der Auftragssumme, Volumen nach Status, Vorab-Zahlungen, Handlungsbedarf (wie Blatt „Übersicht“) |
 | Fristen | Offene Nachträge nach Fristenampel (ROT, PRÜFEN, KRITISCH, BALD), Nachfassen fällig |
 | Nachtragsliste | Alle Nachträge, Formular mit allen Spalten, Kennzahlen und Ergänzungsbedarf je Nachtrag |
-| Übergabe GL | Textentwurf für die monatliche Übergabe an die Geschäftsleitung |
+| Übergabe GL | Textentwurf für die monatliche Übergabe an die Geschäftsleitung (kopieren oder als Textdatei speichern) |
 | Projekt & Daten | Vorhaben, Auftragssumme, Warnschwelle; CSV/JSON-Import und -Export |
 
 ## Excel-Rundlauf

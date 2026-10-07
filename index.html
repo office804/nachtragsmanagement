@@ -51,6 +51,18 @@
     </form>
   </dialog>
 
+  <dialog id="frage">
+    <form method="dialog" class="frage-form">
+      <p id="frage-text"></p>
+      <div class="toolbar">
+        <span class="spacer"></span>
+        <button value="abbrechen" id="frage-abbrechen">Abbrechen</button>
+        <button value="ok" id="frage-ok" class="primary">OK</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" hidden></div>
+
   <script src="model.js"></script>
   <script src="app.js"></script>
 </body>
